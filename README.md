@@ -75,10 +75,6 @@ To test your network, run
 
 The script will output the testing results.
 
-### Implementing UDP and ICMP
-
-Previously we only implemented header logic and parsing for TCP packets. Now in ECMP implementation, you will need to support UDP and ICMP. Unlike TCP, UDP allows senders to send unlimited traffic. ICMP is mostly used for error-reporting, which is used in `ping` and `traceroute` applications.
-
 ## Compare ECMP with Binary Tree and two-core splitting 
 
 Use *Application setting A* as described in Project 1, but now run it with ECMP. 
