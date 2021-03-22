@@ -139,7 +139,7 @@ control MyIngress(inout headers hdr,
         
     }
 
-    action set_nhop(macAddr_t dstAddr, egressSpec_t port) {
+    action set_nhop(egressSpec_t port) {
         //TODO: Define the set_nhop action. You can copy it from the previous exercise, they are the same.
         
     }

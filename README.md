@@ -9,7 +9,7 @@
 
 ## Getting Started
 
-This project inherits your Fattree topology and application settings in project 1. Copy `topology/p4app_fat.json` from your project 1 directory to this directory.
+This project inherits the application settings in project 1. We provide the Fattree topology file `topology/fat_tree_app.json` that couples with our testing scripts. Note that the switch port mapping in `topology/fat_tree_app.json` might be different with your mapping in project 1. 
 
 In project 1, we distributed traffic across two separated core switches for different application (`controller_fat_twocore.py`). But this is not efficient enough. For instance, if one application stops working, then its corresponding core switch is wasted. 
 Thus, we need a more advanced routing strategy -- ECMP. At the end of ECMP experiment, you are expected to see even higher throughput of iperf and lower latency of Memcached, and better video quality, compared with `controller_fat_twocore.py`. 
@@ -30,6 +30,7 @@ Put simply, instead of looking at the MAC address, the match action tables on th
 
 ### Steps: Handling Layer 3 Packets
 
+- In `topology/fat_tree_app.json`, change the `program` field to `p4src/l3fwd.p4`.
 - In `p4src/l3fwd.p4`, define a parser for `tcp` packets. Next, define the deparser (by calling `emit` on all headers). Finally, define the ingress processing logic, including defining a table with destination IP address as the key, defining corresponding actions. 
 The default IP addresses for the 16 hosts are from 10.0.0.1 to 10.0.0.16. 
 You can use lpm (longest prefix matching) matching rather than exact matching mechanism to reduce the number of table entries. lpm means longest prefix matching, which enables you to use subnet as the matching key. For example, subnet 10.0.1.0/24 represents all IP addresses matching the first 24 bits of 10.0.1.0, i.e., IP addresses from 10.0.1.0 to 10.0.1.255. Note that if you want to set a single IP address, e.g., 10.0.1.1 as the key of a lpm table key, please use 10.0.1.1/32 rather than 10.0.1.1 as the key.
@@ -37,11 +38,9 @@ You can use lpm (longest prefix matching) matching rather than exact matching me
 
 ### Test your code
 
-In `topology/p4app_fat.json`, change the `program` field to `p4src/l3fwd.p4`.
-
 Start mininet and the controller:
 ```
-sudo p4run --conf topology/p4app_fat.json
+sudo p4run --conf topology/fat_tree_app.json
 python controller/controller_fat_l3.py
 ```
 
@@ -58,22 +57,57 @@ ECMP can be implemented in multiple ways using P4 and the control plane leaving 
 
 **Requirement 1** The flow 5-tuple (source IP address, destination IP address, source port, destination port, protocol) needs to be hashed *in the data plane*. We will not accept solutions that try to circumvent this through control plane rules or by using the controller to do hash computation.
 
-**Requirement 2** The implementation has to be topology independent. It should not make any assumptions regarding the number of switches present, the IP addresses of the underlying hosts or the paths in the topology. While we will only be testing your solution on a Fat Tree, we may not be using the same number of hosts or the same host to IP address mapping as the one you are provided.
+**Requirement 2** The data-plane (P4 code) implementation has to be topology independent. It should not make any assumptions regarding the number of switches present, the IP addresses of the underlying hosts or the paths in the topology. 
 
 ### Files that need changes
 
-- In `topology/p4app_fat.json`, change the `program` field to `p4src/ecmp.p4`.
 - In `p4src/l3fwd.p4`, implement the ECMP algorithm in the ingress part and define necessary metadata fields. This is in addition to the l3 forwarding logic you added earlier.
 - In `controller/controller_fat_l3.py`, fill in the table fields if needed. This is in addition to the l3 routing logic you added earlier.
 
 ### Test your code
 
 We have a testing script `tests/validate_ecmp.py`, which will monitor the traffic in your network, to validate whether the ecmp works. It will generate iperf traffic randomly, and test whether the load is balanced across different hops.
-To test your network, run
+To test your network, first install `iperf3` by `sudo apt-get install -y iperf3`, then run
 
 	sudo python3 tests/validate_ecmp.py
 
 The script will output the testing results.
+
+### Hints
+1. In the code skeleton we provide, there are two tables: `ipv4_lpm` and `ecmp_group_to_nhop`. Note that the followings are just hints for one possible implementation, and you are free to implement your own. 
+    * The first table maps `dst_ip_addr` to `ecmp_group_id` and `num_nhops`. The action `ecmp_group` is actually calculating the hash value. 
+    * The second table maps the hash value you get (you probably need to think of how to store the hash value calculated in the action `ecmp_group`) and the `ecmp_group_id` to the egress port. The action `set_nhop` will set the egress port. 
+    * Why would we need `ecmp_group_id`? `ecmp_group_id` can help your p4 program choose different egress ports on Tor and Aggregate switch for the same 5-tuple (eg, you can have different `ecmp_group_id` for Tor and Agg, and specify different rules for `ecmp_group_to_nhop` table in your controller). 
+
+2. In the controller you can specify multiple mapped values/parameters: 
+    ```
+    controller.table_add("ipv4_lpm", "ecmp_group", [str(host_ip)], [str(ecmp_group_id), str(num_nhops)])
+    ```
+
+3. You can map on multiple fields like this: 
+    ```
+    key = { 
+        hdr.xx: exact; 
+        meta.yy: exact; 
+    }
+    ```
+
+4. The following example shows how to conditionally apply the second table: 
+    ```
+    apply {
+        switch (table_a.apply().action_run) {
+            action_name: {
+                // code here to execute if table executed action_name
+                table_b.apply();
+            }
+            default: {
+                // Code here to execute if table executed any of the
+                // actions not explicitly mentioned in other cases.
+            }
+        }
+    }
+    ```
+
 
 ## Compare ECMP with Binary Tree and two-core splitting 
 
