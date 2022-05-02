@@ -89,7 +89,7 @@ Finally, we need to define `struct headers` to describe which packet headers are
 
 The metadata structure can consist of pretty much whatever you want. One common use is to store information that is computed in earlier stages for consumption in later stages in the packet pipeline.
 
-_Note: Not all of the fields that you define in the metadata and headers structures need to be set. For instance, if your program takes different actions for a TCP or UDP packet, you may include a field for both a TCP and UDP header in your headers structure. You can determine if a specific header field has been set by calling the isValid() function, and you can use the setValid() and setInvalid() member functions on header fields to control the output of the isValid() function._
+**Note:** Not all of the fields that you define in the metadata and headers structures need to be set. For instance, if your program takes different actions for a TCP or UDP packet, you may include a field for both a TCP and UDP header in your headers structure. You can determine if a specific header field has been set by calling the isValid() function, and you can use the setValid() and setInvalid() member functions on header fields to control the output of the isValid() function._
 
 ### Writing a parser
 
@@ -164,6 +164,13 @@ For each key field, you should also specify a matching rule. For this course, we
 `lpm` is an acronym for longest-prefix matching. Most commonly used in combination with Layer-3 IP routing, the rule states that if the packet information matches some prefix key installed by the controller. If the packet matches more than one installed keys, the longest prefix key is used. For instance, say a match table specifies that a packet’s IPv4 address should be used as a key and that the controller installs two mappings with keys `192.168.*.*` and `192.168.254.*`. If a packet arrives at the switch with IPv4 address `192.168.0.0`, the first mapping will be used. However, if a packet arrives at the switch with IPv4 address `192.168.254.254`, the second mapping will be used because the address matches both keys but the second prefix is longer.
 
 A table can use multiple fields as keys as well and they need not have the same match rules (e.g. both IPv4 destination and source addresses but one with `exact` matching and one with `lpm` matching) and a packet only takes the rule's actions when if the packet information matches all the keys according to their specified match rules.
+For example, you can map on multiple fields like this: 
+```
+    key = { 
+        hdr.xx: lpm; 
+        meta.yy: exact; 
+    }
+```
 
 #### Actions
 
@@ -229,6 +236,22 @@ A complete example of a simple ingress processing component is given in the `p4s
     }
 ```
 
+The following example shows how to conditionally apply the second table: 
+```
+    apply {
+        switch (table_a.apply().action_run) {
+            action_name: {
+                // code here to execute if table executed action_name
+                table_b.apply();
+            }
+            default: {
+                // Code here to execute if table executed any of the
+                // actions not explicitly mentioned in other cases.
+            }
+        }
+    }
+```
+
 ## Egress Processing
 
 This can typically be left as the default which is seen in Project 0. The only time it may useful to work with egress processing in this course is in relation to cloning/recirculating which is discussed later.
@@ -247,35 +270,93 @@ In this stage, you will call the emit member function of the packet object and s
         }
     }
 
-Like in parsing, deparsing must be done in-order with the outermost header of a packet being written first. Also, if a field of the hdr object is marked as invalid, then the P4 program will skip over the emission of that header. This can be useful when working with UDP or TCP traffic where only one of the headers should be marked as valid for a given packet, but your code can include both emission statements without error.
+**Note:** Like in parsing, deparsing must be done in-order with the outermost header of a packet being written first. Also, if a field of the hdr object is marked as invalid, then the P4 program will skip over the emission of that header. This can be useful when working with UDP or TCP traffic where only one of the headers should be marked as valid for a given packet, but your code can include both emission statements without error.
+
+# Registers
+
+Registers provides stateful storage for packet processing in P4. Essentially, registers are an array of counters with user-defined width that can be accessed and modified by every packet. It can be used to store state information for the ingress or egress pipeline. 
+
+For example, the following code define a 8192 registers each with 48 bits in the ingress pipeline: 
+```
+control MyIngress(inout headers hdr, inout metadata meta,
+                  inout standard_metadata_t standard_metadata) {
+    register<bit<48>>(8192) register_array;
+}
+```
+
+You can use read/write functions to access and modify specific register value in actions: 
+* void read(result, bit<32> index): function to read the content of register at index. Stores the output at the variable result (which must have the same width). For example, 
+    ```
+    bit<48> register_value;
+    register_array.read(register_value, 0);
+    ```
+* void write(bit<32> index, value): function that write vale (also with the same width) at the register index. 
+
+# Controller-Side Operations
+
+P4 controller is a separate piece of code that sets match-action rules for P4 program. The controller needs to be run after P4 program gets started. In this course, we focus on python-written controller. 
+
+For example, assume action `set_nhop` in the table `ipv4_lpm` matches on pacekt `dst_ip`; the following code will set a match-action rule that tells the switch to route any packet with `dst_ip` of `10.0.0.1` to port 1: 
+```
+controller.table_add("ipv4_lpm", "set_nhop", ["10.0.0.1"], ["1"])
+```
+
+You can specify multiple matching keys as follows: 
+```
+controller.table_add("table_name", "action_name", [str(src_ip), str(dst_ip)], [str(num_nhops)])
+```
+
+You can specify multiple mapped values (i.e., action parameters): 
+```
+controller.table_add("ipv4_lpm", "ecmp_group", [str(dst_ip)], [str(ecmp_group_id), str(num_nhops)])
+```
 
 # Useful Functions
 
-## Clone/Recirculate
-
-Up until this point, it was assumed that packets move through the P4 program linearly. That is, they arrive at a switch, go through each stage of the pipeline, and leave the switch on the appropriate port. However, P4 has built-in functions which can alter this packet flow. In this course we focus on two of these functions: `clone3(...)` and `recirculate(...)`.
-
-The `clone3` function replicates a packet, with exact semantics depending on its three arguments:
-
-1. The type of cloning to perform. This should be one of the following: `CloneType.I2E` or `CloneType.E2E`. If the former is used, the `clone3` function should be called during the ingress processing as this will send two (distinguishable) copies of the packet to the egress pipeline once ingress processing is complete. If the latter is used, the “clone3” function should be called during the egress processing as this sends the original packet on to its appropriate output port and sends the copy back to the beginning of the egress pipeline
-2. The `mirror_session_id`. You should be able to ignore this argument for the purposes of this course. If you need to work with it, further instructions will be given.
-3. The metadata object that the cloned packet should have.
-
-The `recirculate` function does not replicate a packet; however, at the end of egress processing, the packet does not leave the switch but is instead sent back to begin the ingress processing once again. It takes a metadata object as an argument which will be the metadata contained by the recirculated packet.
-
-During ingress or egress processing, a cloned or recirculated packet can be distinguished from regular packets by checking the value of the `standard_metadata.instance_type` field of the `standard_metadata_t` object. The mapping between packet types and values of this field can be found [here](https://github.com/p4lang/switch/blob/master/p4src/includes/intrinsic.p4#L74). You may find it useful to copy these definitions into your code to help distinguish between different types of packets.
-
-_Note: These functions do not have an immediate effect on packet processing. That is, any logic after the call to these functions will continue to operate as normal. It is not until the end of either ingress or egress processing (depending on the exact function call) that the cloning or recirculating actually happens._
-
 ## Hash
 
-It will be useful in this course to take hashes over collections of values. Fortunately, P4 includes the built-in function `hash(...)` that implements several hash functions. The function takes several arguments:
+Hashing is a function that map data of arbitrary size to fixed-size values. 
+For example, in Project 3, when you implement the ECMP function which hashes on the five tuples of a flow, maps the flow to a fixed number of possible paths, and save the result in the metadata. For a more general description of hashing, you can reference [this article](https://medium.com/coinmonks/gentle-introduction-to-hashing-61295dbcc0c5).
 
-1. The location to store the hash value. Typically, you will pass a metadata field.
-2. The hashing algorithm to use. You will typically want to use either `HashAlgorithm.crc16` or `HashAlgorithm.crc32`
-3. The base for the hash algorithm. You can just use `(bit<1>)0` or really any number that satisfies the restrictions of the hash algorithm.
+P4 includes the built-in function `hash(...)` that implements several hash functions. The function takes several arguments:
+
+1. The location to store the hash value. Typically, you use a metadata field.
+2. The hashing algorithm to use. You typically want to use either `HashAlgorithm.crc16` or `HashAlgorithm.crc32`
+3. The base for the hash algorithm (or the hash seed). You can just use `(bit<1>)0` or any number that satisfies the restrictions of the hash algorithm.
 4. The fields to hash over following the form `{field1, field2, … }`
-5. The maximum value of the hash output. You may find that this is restricted to be a power of 2.
+5. The maximum value of the hash output. For example, if you specify it as 2,your hash values are either 0 or 1. The maximum value is restricted to be a power of 2.
+
+## Clone/Recirulate packets
+
+When a packet arrives at a switch, it goes through each stage of the pipeline, and leaves the switch on a output port. Now we discuss an alternative option for the packet flow in P4 that is useful for your course projects. 
+We introduce three functions: `clone`, `clone3`, and `recirculate`.
+
+1. `clone(in CloneType type, in bit<32> session)`
+
+    We use `clone` and `clone3` functions to replicate a packet. 
+    - `in CloneType type` indicates the type of cloning to perform. This should be one of the following: `CloneType.I2E` or `CloneType.E2E`. `CloneType.I2E` means that the switch runs `clone` at the end of the ingress processing and sends two (distinguishable) copies of the packet to the egress pipeline once ingress processing is complete. `CloneType.E2E` means that the switch runs `clone` at the end of the egress processing as this sends the original packet on to its appropriate output port and sends the copy of the packet back to the beginning of the egress pipeline. 
+    - `in bit<32> session` is the mirror id or session id. The switch uses the mirroring ID `mirror_session_id` to know to which port the packet should be cloned to. This mapping needs to be configured using the control plane API as follows:  
+        ```
+        def add_mirroring_ids(self):
+            for sw_name, controller in self.controllers.items():
+                controller.mirroring_add(100, 1)
+        ```
+        After specifying this mapping, the switch sends all the packets cloned with `mirror_session_id` of 100 to switch port 1. 
+
+2. `clone3(in CloneType type, in bit<32> session, in T metadata)`
+
+    `clone3` is similar to `clone` which also replicates a packet. The main difference is that it has a third argument `in T metadata`. This is the metadata object that you define and want to put in the cloned packet. The metadata field is the same as that on a normal packet as we described in the Parser part. 
+
+3. `recirculate(in T metadata)`.
+
+   The `recirculate` function does not replicate a packet. Instead, at the end of egress processing, the switch does not forward the packet to the network, but sends the packet to the beginning of the ingress pipeline again. 
+   
+   `in T metadata` indicates the metadata you put in the recirculated packet. However, there is a bug in p4utils, for `recirculate` function to work properly: you should just call it with curly brackets as parameter, e.g., `recirculate({})` instead of putting a metadata. 
+
+During ingress or egress processing, we can distinguish a cloned or recirculated packet from the regular packets by checking the value of the `standard_metadata.instance_type` field of the `standard_metadata_t` object. The mapping between packet types and values of this field can be found [here](https://github.com/p4lang/switch/blob/master/p4src/includes/intrinsic.p4#L74). You may find it useful to copy these definitions into your code to help distinguish between different types of packets.
+
+**Note:** These functions do not have an immediate effect on packet processing. That is, any logic after the call to these functions will continue to operate as normal. It is not until the end of either ingress or egress processing (depending on the exact function call) that the cloning or recirculating actually happens.
+
 
 # Miscellaneous
 

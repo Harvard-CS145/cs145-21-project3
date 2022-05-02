@@ -10,7 +10,7 @@ Summary: this module does L3 forwarding. For more info on this module, read the 
 
 /*
 
-Summary: The following section defines the protocol headers used by packets. These include the IPv4, TCP, UDP and Ethernet headers. A header declaration in P4 includes all the field names (in order) together with the size (in bits) of each field. Metadata is similar to a header but only holds meaning during switch processing. It is only part of the packet while the packet is in the switch pipeline and is removed when the packet exits the switch.
+Summary: The following section defines the protocol headers used by packets. These include the IPv4, TCP, and Ethernet headers. A header declaration in P4 includes all the field names (in order) together with the size (in bits) of each field. Metadata is similar to a header but only holds meaning during switch processing. It is only part of the packet while the packet is in the switch pipeline and is removed when the packet exits the switch.
 
 */
 
@@ -128,35 +128,40 @@ control MyIngress(inout headers hdr,
                   inout metadata meta,
                   inout standard_metadata_t standard_metadata) {
 
-    action drop() {
-
-        mark_to_drop(standard_metadata);
-    }
-
-    // ECMP Only
-    action ecmp_group(bit<14> ecmp_group_id, bit<16> num_nhops){
-        //TODO: define the ecmp_group action, here you need to hash the 5-tuple mod num_ports and safe it in metadata
-        
-    }
-
-    action set_nhop(egressSpec_t port) {
-        //TODO: Define the set_nhop action. You can copy it from the previous exercise, they are the same.
-        
-    }
-
-    // ECMP Only
-    table ecmp_group_to_nhop {
-        //TODO: define the ecmp table, this table is only called when multiple hops are available   
-    }
-
+    // This table maps dstAddr to ecmp_group_id and num_nhops (the number of total output ports). The action ecmp_group is actually calculating the hash value.
     table ipv4_lpm {
         //TODO: define the ip forwarding table
         
     }
 
+    // ECMP Only
+    // ecmp_group_id: ecmp group ID for this switch, specified by constroller
+    // num_nhops: the number of total output ports, specified by controller
+    action ecmp_group(bit<14> ecmp_group_id, bit<16> num_nhops){
+        //TODO: define the ecmp_group action, where you need to hash the 5-tuple mod num_ports and save it in metadata
+        
+    }
+
+    // dropped packets will not get forwarded
+    action drop() {
+        mark_to_drop(standard_metadata);
+    }
+    
+    // The second table maps the hash value you get (you probably need to think of how to store the hash value calculated in the ecmp_group) and the ecmp_group_id to the egress port. The action set_nhop sets the egress port. 
+    table ecmp_group_to_nhop {
+        //TODO: define the ecmp table, this table is only called when multiple egress ports are available 
+    }
+
+    // set next hop
+    // port: the egress port for this packet
+    action set_nhop(egressSpec_t port) {
+        //TODO: Define the set_nhop action. You can copy it from the previous exercise, they are the same.
+        
+    }
+
     apply {
         //TODO: implement the ingress logic.
-        //ECMP Only Hint: check validities, apply first table, and if needed the second table.
+        //ECMP Only Hint: check validities, apply first table (ie, ipv4_lpm), and if multiple possible egress ports exist (ie, ecmp_group action triggered), then apply the second table (ie, ecmp_group_to_nhop).
         
     }
 }
@@ -168,8 +173,6 @@ control MyIngress(inout headers hdr,
 control MyEgress(inout headers hdr,
                  inout metadata meta,
                  inout standard_metadata_t standard_metadata) {
-
-
     apply {  }
 }
 
@@ -197,8 +200,6 @@ control MyComputeChecksum(inout headers hdr, inout metadata meta) {
               HashAlgorithm.csum16);    
     }
 }
-
-
 
 /*************************************************************************
 ***********************  S W I T C H  *******************************

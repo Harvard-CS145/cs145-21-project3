@@ -38,6 +38,8 @@ for pod in range(1, 5):
     # check whether the 4 numbers are balanced
     # using the deviation
     avg = (d1 + d2 + d3 + d4) / 4.0
+    if d1 == 0 or d2 == 0 or d3 == 0 or d4 == 0:
+        fail = True
     dev = ((d1 - avg) * (d1 - avg) + (d2 - avg) * (d2 - avg) + (d3 - avg) * (d3 - avg) + (d4 - avg) * (d4 - avg)) / 4.0
     dev = math.sqrt(dev)
     dev = dev / avg
@@ -46,6 +48,6 @@ for pod in range(1, 5):
         fail = True
 
 if not fail:
-    print("Test pass")
+    print("Test passes")
 else:
-    print("Test fail")
+    print("Test fails")

@@ -20,7 +20,7 @@ def test_fat_tree():
 	c = 0
 	for h in hosts:
 		for ip in host_ips:
-			assert ("0% packet loss" in os.popen('mx {0} ping -c 1 {1}'.format(h, ip)).read())
+			assert (", 0% packet loss" in os.popen('mx {0} ping -c 1 {1}'.format(h, ip)).read())
 			c += 1
 			print(int(c * 100.0 / (16 * 16)), '% complete.', end='\r', flush=True)
 	
